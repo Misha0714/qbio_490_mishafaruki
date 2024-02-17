@@ -1,0 +1,190 @@
+---
+title: "Intro_to_MAF"
+date: "2024-01-19"
+---
+
+***Deliverables***
+-Upload this R Notebook to your GitHub and submit the link to your Repo on BB.
+-Include any graphs or figures created in this assignment in the folder with your R notebook with descriptive file names.
+
+Since this is an optional partner activity, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In MAF_Tutorial.Rmd, you looked at how to analyze mutation data in terms of clinical variables as well as mutation status. In this assignment, you will need to combine the two skills to demonstrate your understanding of categorical variables and R data structures.
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath("/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/analysis_data"))
+```
+
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data .csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clinical <- read.csv("/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/analysis_data/skcm_clinical_data.csv")
+colnames(clinical)[ colnames(clinical) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+write.csv(clinical, "/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/analysis_data/skcm_clinical_data.csv", row.names = FALSE)
+
+```
+
+```{r}
+maf_query <- GDCquery(
+    project = "TCGA-SKCM", 
+    data.category = "Simple Nucleotide Variation", 
+    access = "open", # we only have access to somatic mutations which are open access
+    data.type = "Masked Somatic Mutation", 
+    workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+#GDCdownload(maf_query) # you shouldn't have to redownload any data!
+
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+
+maf_object <- read.maf(maf = maf, 
+                       clinicalData = clinical,
+                       isTCGA = TRUE)
+
+
+```
+
+
+*1*
+Choose a clinical variable to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+
+
+# Create a new column with tumor_status as a factor
+clinical$tumor_status_factor <- as.factor(clinical$tumor_status)
+
+# Save the modified clinical data
+write.csv(clinical, "/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/analysis_data/skcm_clinical_data_modified.csv", row.names = FALSE)
+
+
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+```{r}
+
+library(ggplot2)
+
+oncoplot(maf = maf_object,
+         top = 10,
+         borderCol = NA) 
+
+
+#I am researching the TTN Gene
+#The TTN gene provides instructions for making a very large protein called titin. This protein plays an important role in skeletal muscles, which the body uses for movement, and in heart (cardiac) muscle
+#Because it is a very large protein there is room for many mutations to occur when building the protein causing many discrepancies 
+
+#ggsave("/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/oncoplot_top#2_SKCM.png")
+```
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+```{r}
+
+# Extract information about TTN mutations from the MAF object
+ttn_mutations <- maf_object@mutations[, "TTN"]
+
+# Create a contingency table
+contingency_table <- table(tumor_status = clinical$tumor_status_factor, ttn_mutation_status = !is.na(ttn_mutations))
+
+# Run Fisher's Exact Test
+fisher_test_result <- fisher.test(contingency_table)
+
+# Print the contingency table
+print(contingency_table)
+
+# Print Fisher's Exact Test result
+print(fisher_test_result)
+
+# Create and save a mosaic plot
+mosaicplot(contingency_table, main = "Contingency Table: TTN Mutation vs. Tumor Status", color = TRUE)
+dev.copy(png, "/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/mosaic_plot_TTN_vs_TumorStatus.png")
+dev.off()
+
+
+
+
+
+```
+
+
+*4*
+Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
+Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+```{r}
+# Assuming maf_object is your MAF object
+
+# Subsetting based on the clinical variable (e.g., tumor_status)
+tumor_group <- subset(maf_object, clinicalData$tumor_status_factor == "Tumor")
+normal_group <- subset(maf_object, clinicalData$tumor_status_factor == "Normal")
+
+# Choose a gene of interest (e.g., TTN)
+gene_of_interest <- "TTN"
+
+# Subset mutations for the chosen gene in both groups
+tumor_mutations <- subset(tumor_group@mutations, Hugo_Symbol == gene_of_interest)
+normal_mutations <- subset(normal_group@mutations, Hugo_Symbol == gene_of_interest)
+
+# Create a co-lollipop plot
+colollipop(maf = list(Tumor = tumor_mutations, Normal = normal_mutations),
+           allsamples = FALSE,
+           title = "Co-Lollipop Plot: TTN Mutations in Tumor vs. Normal",
+           xlab = "Sample ID",
+           main = gene_of_interest)
+
+
+
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+```{r}
+# Assuming clinical data contains information about Overall_Survival_Status and other required variables
+
+# Add Overall_Survival_Status column
+clinical$Overall_Survival_Status <- with(clinical, ifelse(Overall_Survival_Status == "LIVING", "Alive", "Deceased"))
+
+# Subset the maf_object based on mutations in the chosen gene
+gene_of_interest <- "TTN"
+gene_mutations <- subset(maf_object@mutations, Hugo_Symbol == gene_of_interest)
+
+# Merge clinical data with mutation data
+merged_data <- merge(clinical, gene_mutations, by = "Tumor_Sample_Barcode", all.x = TRUE)
+
+# Create a mafSurvival object
+maf_survival_object <- mafSurvival(
+  data = merged_data,
+  variables = c("Overall_Survival_Status", "tumor_status_factor"),
+  time = "Overall_Survival_Days"
+)
+
+# Generate a Kaplan-Meier plot
+km_plot <- plotmafSurvival(
+  maf_survival_object,
+  variable = "TTN_Mutation_Status",  # Adjust column name based on your MAF data
+  title = "Kaplan-Meier Plot: TTN Mutation vs. Overall Survival",
+  xlab = "Time (Days)",
+  ylab = "Survival Probability",
+  test = TRUE  # Optionally perform log-rank test
+)
+
+# Save the plot
+ggsave("/Users/mishafaruki/Desktop/QBIO490/qbio_490_mishafaruki/km_plot_TTN_overall_survival.png", plot = km_plot)
+
+
+
+```
